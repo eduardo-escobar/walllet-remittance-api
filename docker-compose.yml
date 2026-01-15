@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: wallet_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: wallet_db
+      POSTGRES_USER: wallet_user
+      POSTGRES_PASSWORD: wallet_pass_2024
+      POSTGRES_INITDB_ARGS: "-E UTF8 --locale=en_US.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet_user -d wallet_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - wallet_network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wallet_api
+    restart: always
+    environment:
+      NODE_ENV: development
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: wallet_db
+      DATABASE_USER: wallet_user
+      DATABASE_PASSWORD: wallet_pass_2024
+      DATABASE_SYNC: "false"
+      DATABASE_LOGGING: "true"
+      PORT: 3000
+      API_PREFIX: api/v1
+      EXCHANGE_RATE_CLP_TO_PEN: "0.0043"
+      TRANSACTION_FEE_PERCENTAGE: "2.5"
+      EXTERNAL_PROVIDER_URL: "https://httpbin.org/delay/1"
+      EXTERNAL_PROVIDER_TIMEOUT: "5000"
+      QUOTE_VALIDITY_MINUTES: "10"
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+      - /app/node_modules
+    networks:
+      - wallet_network
+    command: npm run start:dev
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  wallet_network:
+    driver: bridge
