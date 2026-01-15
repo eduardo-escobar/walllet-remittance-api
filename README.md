@@ -314,12 +314,91 @@ src/
     └── remittances/
 ```
 
-### Decisiones Arquitectónicas
+## 🏗️ Decisiones de Arquitectura
 
-**Monolito Modular**
-- Simplicidad para MVP
-- Fácil de desarrollar y desplegar
-- Preparado para microservicios futuros
+### ¿Monolito o Microservicios?
+
+Para este caso de uso (Wallet + Remesas), **iniciaría con un monolito modular** por las siguientes razones:
+
+**Contexto del dominio:**
+- Wallet y Remesas están fuertemente acoplados: cada remesa requiere validar balance, retener fondos y crear transacciones de forma atómica
+- Separar estos dominios en microservicios introduce complejidad innecesaria: transacciones distribuidas, eventual consistency, y mayor latencia
+- El volumen inicial no justifica la sobrecarga operacional de microservicios
+
+**Ventajas del monolito modular:**
+- **Transacciones ACID nativas**: Las operaciones críticas (hold → deduct → transaction) se ejecutan en una sola transacción de base de datos
+- **Menor latencia**: No hay llamadas HTTP entre servicios para operaciones que deben ser síncronas
+- **Simplicidad operacional**: Un solo deployment, un solo proceso a monitorear, logs centralizados
+- **Desarrollo más rápido**: Refactors seguros, debugging más simple, menos boilerplate
+
+**Preparado para escalar:**
+- Módulos bien definidos (`users`, `wallets`, `transactions`, `remittances`) facilitan extraer servicios si es necesario
+- Interfaces claras entre módulos permiten migración gradual
+- Si el volumen crece, puedo extraer primero `remittances` (operación más pesada) manteniendo `wallets` en el core
+
+**Cuándo migrar a microservicios:**
+- Cuando un módulo tenga requisitos de escalado muy diferentes (ej: quotes puede necesitar 10x más instancias que wallets)
+- Cuando equipos independientes necesiten deployar sin coordinación
+- Cuando la complejidad del monolito supere los beneficios (>100k líneas de código, >10 bounded contexts)
+
+---
+
+### 🚀 Deployment en AWS para Alta Disponibilidad
+
+**Arquitectura propuesta:**
+
+**Internet** → **Route 53** → **ALB (Multi-AZ)** → **ECS Fargate (2+ AZs)** → **RDS PostgreSQL (Multi-AZ)**
+
+**Componentes clave:**
+
+1. **Compute: ECS Fargate**
+   - Auto-scaling basado en CPU (target 70%) y memoria
+   - Mínimo 2 tasks en diferentes AZs para tolerancia a fallos
+   - Health checks cada 30s, unhealthy threshold: 2 fallos consecutivos
+   - Rolling deployments con 50% de capacidad mínima durante updates
+
+2. **Base de datos: RDS PostgreSQL Multi-AZ**
+   - Instancia primaria + réplica síncrona en otra AZ
+   - Failover automático en <60 segundos
+   - Backups automáticos diarios con retención de 7 días
+   - Read replicas si el tráfico de lectura crece (ej: reportes)
+
+3. **Balanceo: Application Load Balancer**
+   - Distribuye tráfico entre tasks en múltiples AZs
+   - Health check en `/health` cada 30s
+   - SSL/TLS termination con certificado de ACM
+   - Connection draining de 30s para deployments sin downtime
+
+4. **Monitoreo y Observabilidad:**
+   - **CloudWatch Logs**: Logs centralizados de todos los containers
+   - **CloudWatch Metrics**: CPU, memoria, latencia de requests, errores 5xx
+   - **CloudWatch Alarms**: Alertas en Slack/PagerDuty si error rate >1% o latencia p99 >500ms
+   - **X-Ray**: Tracing distribuido para identificar cuellos de botella
+
+5. **Secrets y Configuración:**
+   - **Secrets Manager**: Credenciales de DB, API keys de proveedores externos
+   - **Parameter Store**: Variables de entorno no sensibles
+   - Rotación automática de secrets cada 90 días
+
+**Estimación de costos (us-east-1):**
+- ECS Fargate (2 tasks 0.5 vCPU, 1GB RAM): ~$30/mes
+- RDS PostgreSQL Multi-AZ (db.t4g.small): ~$50/mes
+- ALB: ~$20/mes
+- Data transfer + CloudWatch: ~$15/mes
+- **Total: ~$115/mes** (sin contar tráfico alto)
+
+**Plan de Disaster Recovery:**
+- **RTO (Recovery Time Objective)**: <5 minutos (failover automático de RDS)
+- **RPO (Recovery Point Objective)**: <1 minuto (replicación síncrona Multi-AZ)
+- Backups diarios en S3 con versionado habilitado
+- Snapshots manuales antes de cambios críticos
+- Runbook documentado para restauración desde backup
+
+**Mejoras futuras (si el tráfico crece):**
+- ElastiCache Redis para idempotency keys y rate limiting
+- CloudFront CDN para assets estáticos de Swagger UI
+- Aurora PostgreSQL Serverless v2 para auto-scaling de DB
+- WAF para protección contra ataques DDoS y SQL injection
 
 **PostgreSQL Único**
 - Sin Redis para MVP
@@ -404,5 +483,5 @@ Para soporte, contactar a: support@example.com
 ---
 
 **Versión**: 1.0.0  
-**Última actualización**: 2024-01-15
+**Última actualización**: 2026-01-15
  
