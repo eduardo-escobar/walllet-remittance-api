@@ -18,6 +18,12 @@ export class QuotesService {
     private readonly exchangeRatesService: ExchangeRatesService,
   ) {}
 
+  private calculateFeePercentage(amount: string) {
+    const amountDecimal = new Decimal(amount);
+    // 1% para montos >= 1,000,000 CLP, 2.5% para el resto
+    return amountDecimal.gte(1000000) ? new Decimal('1') : new Decimal('2.5');
+  }
+
   async create(createQuoteDto: CreateQuoteDto): Promise<Quote> {
     const { userId, fromCurrency, toCurrency, sendAmount } = createQuoteDto;
 
@@ -40,7 +46,8 @@ export class QuotesService {
 
     // Calcular montos
     const rate = new Decimal(exchangeRate.rate);
-    const feeAmount = amount.times(this.FEE_PERCENTAGE).dividedBy(100);
+    const feePercentage = this.calculateFeePercentage(sendAmount); // ← NUEVO
+    const feeAmount = amount.times(feePercentage).dividedBy(100);
     const totalAmount = amount.plus(feeAmount);
     const receiveAmount = amount.times(rate);
 
@@ -55,7 +62,7 @@ export class QuotesService {
       toCurrency,
       sendAmount: amount.toFixed(4),
       exchangeRate: rate.toFixed(10),
-      feePercentage: this.FEE_PERCENTAGE.toFixed(2),
+      feePercentage: feePercentage.toFixed(2),
       feeAmount: feeAmount.toFixed(4),
       receiveAmount: receiveAmount.toFixed(4),
       totalAmount: totalAmount.toFixed(4),
